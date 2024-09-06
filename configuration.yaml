@@ -13,4 +13,11 @@ parser:
       title: h1.tm-title
 
   goroutines-amount: 5
-  default-interval: 1s
+  default-interval: 10m
+
+database:
+  host: database
+  port: 5432
+  database: postgres
+  username: postgres
+  password: '{{env "POSTGRES_PASSWORD"}}'

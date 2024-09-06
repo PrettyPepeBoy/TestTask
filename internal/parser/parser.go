@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"fmt"
 	"github.com/spf13/viper"
 	"time"
 )
@@ -11,12 +12,10 @@ var (
 )
 
 type Parser struct {
-	buf  []*ArticleData
 	habr *habrParser
 
-	interval         time.Duration
-	timer            *time.Timer
-	goroutinesAmount int
+	interval time.Duration
+	timer    *time.Timer
 }
 
 type ArticleData struct {
@@ -29,35 +28,21 @@ type ArticleData struct {
 
 func NewParser() *Parser {
 	return &Parser{
-		goroutinesAmount: viper.GetInt("parser.goroutines-amount"),
-		interval:         viper.GetDuration("parser.default-interval"),
-		timer:            time.NewTimer(viper.GetDuration("parser.default-interval")),
-		habr:             setupHabrParser(),
+		interval: viper.GetDuration("parser.default-interval"),
+		timer:    time.NewTimer(viper.GetDuration("parser.default-interval")),
+		habr:     newHabrParser(),
 	}
 }
 
-func (p *Parser) GetNewArticles() {
+func (p *Parser) ParseHabrPage() {
 	go func() {
 		for {
 			<-p.timer.C
-			p.habr.getHabrArticleUrlFromMainPage()
-			p.buf = make([]*ArticleData, 0, len(p.habr.articlesBuf))
-			p.habr.processParing()
-			p.timer.Reset(time.Hour)
+			p.habr.parseMainPage()
+			fmt.Println(p.habr.buf)
+			p.timer.Reset(p.interval)
 		}
 	}()
-}
 
-func (p *Parser) Parse() {
-	for i := 0; i < p.goroutinesAmount; i++ {
-		go p.processRoutine(p.habr.c)
-	}
-}
-
-func (p *Parser) processRoutine(c chan string) {
-	for {
-		val := <-c
-		article := p.habr.parseHabrArticle(val)
-		p.buf = append(p.buf, article)
-	}
+	p.habr.parse()
 }

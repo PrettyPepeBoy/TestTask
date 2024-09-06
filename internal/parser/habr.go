@@ -4,7 +4,6 @@ import (
 	"github.com/gocolly/colly/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-
 	"strings"
 	"time"
 )
@@ -16,12 +15,14 @@ type habrParser struct {
 	articlePageQueryTitle    string
 	articlePageQueryTime     string
 	articlePageQueryUserLink string
-	articlesBuf              []string
 
-	c chan string
+	buf              []*ArticleData
+	articleUrlsBuf   []string
+	goroutinesAmount int
+	c                chan string
 }
 
-func setupHabrParser() *habrParser {
+func newHabrParser() *habrParser {
 	return &habrParser{
 		mainUrl:                  viper.GetString("parser.habr.links.main-url"),
 		articleUrlPrefix:         viper.GetString("parser.habr.links.article-url-prefix"),
@@ -29,17 +30,10 @@ func setupHabrParser() *habrParser {
 		articlePageQueryTime:     viper.GetString("parser.habr.article-page-query.time"),
 		articlePageQueryTitle:    viper.GetString("parser.habr.article-page-query.title"),
 		articlePageQueryUserLink: viper.GetString("parser.habr.article-page-query.user-link"),
-		articlesBuf:              make([]string, 0),
+		articleUrlsBuf:           make([]string, 0),
 		c:                        make(chan string),
+		goroutinesAmount:         viper.GetInt("parser.goroutines-amount"),
 	}
-}
-
-func (h *habrParser) processParing() {
-	for _, elem := range h.articlesBuf {
-		h.c <- elem
-	}
-
-	h.articlesBuf = h.articlesBuf[:0]
 }
 
 func (h *habrParser) getHabrArticleUrlFromMainPage() {
@@ -50,7 +44,7 @@ func (h *habrParser) getHabrArticleUrlFromMainPage() {
 		if !ok {
 			panic("wrong attribute was given to selection")
 		}
-		h.articlesBuf = append(h.articlesBuf, strings.TrimSpace(h.articleUrlPrefix+articleUrl))
+		h.articleUrlsBuf = append(h.articleUrlsBuf, strings.TrimSpace(h.articleUrlPrefix+articleUrl))
 	})
 
 	err := collector.Visit(h.mainUrl)
@@ -95,4 +89,32 @@ func (h *habrParser) parseHabrArticle(articleUrl string) *ArticleData {
 	}
 
 	return &data
+}
+
+func (h *habrParser) parse() {
+	for i := 0; i < h.goroutinesAmount; i++ {
+		go h.processRoutine()
+	}
+}
+
+func (h *habrParser) processRoutine() {
+	for {
+		val := <-h.c
+		article := h.parseHabrArticle(val)
+		h.buf = append(h.buf, article)
+	}
+}
+
+func (h *habrParser) parseMainPage() {
+	h.getHabrArticleUrlFromMainPage()
+	h.buf = make([]*ArticleData, 0, len(h.articleUrlsBuf))
+	h.sendArticlesFromBuf()
+}
+
+func (h *habrParser) sendArticlesFromBuf() {
+	for _, elem := range h.articleUrlsBuf {
+		h.c <- elem
+	}
+
+	h.articleUrlsBuf = h.articleUrlsBuf[:0]
 }
