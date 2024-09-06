@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"github.com/spf13/viper"
+	"testTask/internal/database"
 	"time"
 )
 
 var (
-	ErrUsernameUrlIsNotExist = errors.New("can not add data without usernameUrl")
+	ErrUsernameUrlIsEmpty = errors.New("username url is empty")
+	ErrUsernameIsEmpty    = errors.New("username is empty")
+	ErrTitleIsEmpty       = errors.New("title is empty")
+	ErrUrlIsEmpty         = errors.New("url is empty")
+	ErrDateIsEmpty        = errors.New("date is empty")
 )
 
 type Parser struct {
@@ -23,14 +28,14 @@ type ArticleData struct {
 	UsernameUrl string
 	Title       string
 	Url         string
-	PublishData time.Time
+	PublishData string
 }
 
-func NewParser() *Parser {
+func NewParser(db *database.Database) *Parser {
 	return &Parser{
 		interval: viper.GetDuration("parser.default-interval"),
 		timer:    time.NewTimer(viper.GetDuration("parser.default-interval")),
-		habr:     newHabrParser(),
+		habr:     newHabrParser(db),
 	}
 }
 

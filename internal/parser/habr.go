@@ -5,6 +5,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"strings"
+	"testTask/internal/database"
 	"time"
 )
 
@@ -16,13 +17,14 @@ type habrParser struct {
 	articlePageQueryTime     string
 	articlePageQueryUserLink string
 
+	storage          *database.Database
 	buf              []*ArticleData
 	articleUrlsBuf   []string
 	goroutinesAmount int
 	c                chan string
 }
 
-func newHabrParser() *habrParser {
+func newHabrParser(db *database.Database) *habrParser {
 	return &habrParser{
 		mainUrl:                  viper.GetString("parser.habr.links.main-url"),
 		articleUrlPrefix:         viper.GetString("parser.habr.links.article-url-prefix"),
@@ -32,6 +34,7 @@ func newHabrParser() *habrParser {
 		articlePageQueryUserLink: viper.GetString("parser.habr.article-page-query.user-link"),
 		articleUrlsBuf:           make([]string, 0),
 		c:                        make(chan string),
+		storage:                  db,
 		goroutinesAmount:         viper.GetInt("parser.goroutines-amount"),
 	}
 }
@@ -61,12 +64,8 @@ func (h *habrParser) parseHabrArticle(articleUrl string) *ArticleData {
 	data.Url = articleUrl
 
 	collector.OnHTML(h.articlePageQueryUserLink, func(htmlElement *colly.HTMLElement) {
-
-		usernameUrl := htmlElement.Attr("href")
-		username := htmlElement.Text
-
-		data.UsernameUrl = strings.TrimSpace(usernameUrl)
-		data.Username = strings.TrimSpace(username)
+		data.UsernameUrl = htmlElement.Attr("href")
+		data.Username = htmlElement.Text
 	})
 
 	collector.OnHTML(h.articlePageQueryTitle, func(htmlElement *colly.HTMLElement) {
@@ -74,13 +73,7 @@ func (h *habrParser) parseHabrArticle(articleUrl string) *ArticleData {
 	})
 
 	collector.OnHTML(h.articlePageQueryTime, func(htmlElement *colly.HTMLElement) {
-		dateString, _ := htmlElement.DOM.Children().Attr("datetime")
-
-		var err error
-		data.PublishData, err = time.Parse(time.RFC3339, dateString)
-		if err != nil {
-			logrus.Errorf("failed to convert data to time, error: %v", err)
-		}
+		data.PublishData, _ = htmlElement.DOM.Children().Attr("datetime")
 	})
 
 	err := collector.Visit(data.Url)
@@ -101,7 +94,10 @@ func (h *habrParser) processRoutine() {
 	for {
 		val := <-h.c
 		article := h.parseHabrArticle(val)
-		h.buf = append(h.buf, article)
+		err := putArticleInTable(article, h.storage)
+		if err != nil {
+			logrus.Errorf("failed to put data in database, error: %v", err)
+		}
 	}
 }
 
@@ -117,4 +113,43 @@ func (h *habrParser) sendArticlesFromBuf() {
 	}
 
 	h.articleUrlsBuf = h.articleUrlsBuf[:0]
+}
+
+func putArticleInTable(article *ArticleData, db *database.Database) error {
+	if article.Url == "" {
+		return ErrUrlIsEmpty
+	}
+
+	if article.Title == "" {
+		return ErrTitleIsEmpty
+	}
+
+	if article.Username == "" {
+		return ErrUsernameIsEmpty
+	}
+
+	if article.UsernameUrl == "" {
+		return ErrUsernameUrlIsEmpty
+	}
+
+	if article.PublishData == "" {
+		return ErrDateIsEmpty
+	}
+
+	date, err := time.Parse(time.RFC3339, article.PublishData)
+	if err != nil {
+		logrus.Errorf("failed to convert data to time, error: %v", err)
+		return err
+	}
+
+	username := strings.TrimSpace(article.Username)
+	usernameUrl := strings.TrimSpace(article.UsernameUrl)
+	url := strings.TrimSpace(article.Url)
+
+	_, err = db.Put(url, username, usernameUrl, article.Title, date)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
