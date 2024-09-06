@@ -19,8 +19,8 @@ var (
 
 func main() {
 	setupConfig()
-	setupParser()
 	setupDatabase()
+	setupParser()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -38,8 +38,13 @@ func setupDatabase() {
 }
 
 func setupParser() {
-	pars = parser.NewParser()
-	pars.ParseHabrPage()
+	var err error
+	pars, err = parser.NewParser(db)
+	if err != nil {
+		logrus.Fatalf("failed to setup parser")
+	}
+
+	pars.Parse()
 }
 
 func setupConfig() {

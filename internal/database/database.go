@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"testTask/internal/parser"
 	"time"
 
 	"github.com/jackc/pgconn"
@@ -14,11 +15,12 @@ import (
 )
 
 type Database struct {
-	db                  *pgx.Conn
-	putInArticlesStmt   *pgconn.StatementDescription
-	getFromTableStmt    *pgconn.StatementDescription
-	deleteFromTableStmt *pgconn.StatementDescription
-	getAllFromTableStmt *pgconn.StatementDescription
+	db                         *pgx.Conn
+	putInArticlesStmt          *pgconn.StatementDescription
+	getFromHabsInformationStmt *pgconn.StatementDescription
+	getFromTableStmt           *pgconn.StatementDescription
+	deleteFromTableStmt        *pgconn.StatementDescription
+	getAllFromTableStmt        *pgconn.StatementDescription
 }
 
 var (
@@ -41,10 +43,15 @@ func NewDatabase() (*Database, error) {
 		return nil, err
 	}
 
-	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put", `INSERT INTO articles(articleURL, username, usernameURL, title, date) VALUES ($1, $2, $3, $4, $5) RETURNING id`)
+	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date) VALUES ($1, $2, $3, $4, $5) RETURNING id`)
 	if err != nil {
-		logrus.Errorf("failed to prepare createTableStmt, error: %v", err)
+		logrus.Errorf("failed to prepare putInAriclesStmt, error: %v", err)
 		return nil, err
+	}
+
+	getFromHabsInformationStmt, err := conn.Prepare(context.Background(), "Get Hab Information", "SELECT * FROM habs")
+	if err != nil {
+		logrus.Errorf("failed to prepare getFromHabsInformationStmt, error: %v", err)
 	}
 
 	getFromTableStmt, err := conn.Prepare(context.Background(), "GetById", `SELECT json_data FROM products WHERE id = $1`)
@@ -66,10 +73,11 @@ func NewDatabase() (*Database, error) {
 	}
 
 	return &Database{db: conn,
-		putInArticlesStmt:   putInArticlesStmt,
-		getFromTableStmt:    getFromTableStmt,
-		deleteFromTableStmt: deleteFromTableStmt,
-		getAllFromTableStmt: getAllFromTable,
+		putInArticlesStmt:          putInArticlesStmt,
+		getFromHabsInformationStmt: getFromHabsInformationStmt,
+		getFromTableStmt:           getFromTableStmt,
+		deleteFromTableStmt:        deleteFromTableStmt,
+		getAllFromTableStmt:        getAllFromTable,
 	}, nil
 }
 
@@ -80,4 +88,42 @@ func (d *Database) Put(articleUrl string, username string, usernameUrl string, t
 	}
 
 	return id, nil
+}
+
+func (d *Database) GetHabsInfo() ([]parser.HabInfo, error) {
+	rows, err := d.db.Query(context.Background(), d.getFromHabsInformationStmt.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		habType                  string
+		mainUrl                  string
+		mainPageQueryArticle     string
+		articleUrlPrefix         string
+		articlePageQueryUserLink string
+		articlePageQueryTitle    string
+		articlePageQueryTime     string
+	)
+	habInfo := make([]parser.HabInfo, 0)
+
+	for rows.Next() {
+		err = rows.Scan(&habType, &mainUrl, &mainPageQueryArticle, &articleUrlPrefix, &articlePageQueryUserLink, &articlePageQueryTitle, &articlePageQueryTime)
+		if err != nil {
+			logrus.Errorf("failed to scan data in %s, error: %v", habType, err)
+			continue
+		}
+
+		habInfo = append(habInfo, parser.HabInfo{
+			HabType:                  habType,
+			MainUrl:                  mainUrl,
+			ArticleUrlPrefix:         mainPageQueryArticle,
+			MainPageQueryArticle:     articleUrlPrefix,
+			ArticlePageQueryTitle:    articlePageQueryUserLink,
+			ArticlePageQueryTime:     articlePageQueryTitle,
+			ArticlePageQueryUserLink: articlePageQueryTime,
+		})
+	}
+
+	return habInfo, nil
 }
