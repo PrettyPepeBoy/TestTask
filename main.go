@@ -25,12 +25,12 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
+	logrus.Info("start server")
 	<-c
 }
 
 func setupDatabase() {
 	var err error
-
 	db, err = database.NewDatabase()
 	if err != nil {
 		logrus.Fatalf("failed to setup database, error: %v", err)

@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"testTask/internal/parser"
+	"testTask/internal/models"
 	"time"
 
 	"github.com/jackc/pgconn"
@@ -29,7 +28,7 @@ var (
 
 func NewDatabase() (*Database, error) {
 	username := viper.GetString("database.username")
-	password := os.Getenv(viper.GetString("database.password"))
+	password := viper.GetString("database.password")
 	host := viper.GetString("database.host")
 	port := viper.GetInt("database.port")
 	database := viper.GetString("database.database")
@@ -43,7 +42,7 @@ func NewDatabase() (*Database, error) {
 		return nil, err
 	}
 
-	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date) VALUES ($1, $2, $3, $4, $5) RETURNING id`)
+	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date, habType) VALUES ($1, $2, $3, $4, $5, $6)`)
 	if err != nil {
 		logrus.Errorf("failed to prepare putInAriclesStmt, error: %v", err)
 		return nil, err
@@ -54,43 +53,40 @@ func NewDatabase() (*Database, error) {
 		logrus.Errorf("failed to prepare getFromHabsInformationStmt, error: %v", err)
 	}
 
-	getFromTableStmt, err := conn.Prepare(context.Background(), "GetById", `SELECT json_data FROM products WHERE id = $1`)
-	if err != nil {
-		logrus.Errorf("failed to prepare getFromTableStmt, error: %v", err)
-		return nil, err
-	}
-
-	deleteFromTableStmt, err := conn.Prepare(context.Background(), "DeleteById", `DELETE FROM products where id = $1`)
-	if err != nil {
-		logrus.Errorf("failed to prepare deleteFromTableStmt, error: %v", err)
-		return nil, err
-	}
-
-	getAllFromTable, err := conn.Prepare(context.Background(), "GetAllFromDb", `SELECT id, json_data FROM products`)
-	if err != nil {
-		logrus.Errorf("failed to prepare getAllFromTableStmt, error: %v", err)
-		return nil, err
-	}
+	//getFromTableStmt, err := conn.Prepare(context.Background(), "GetById", `SELECT json_data FROM products WHERE id = $1`)
+	//if err != nil {
+	//	logrus.Errorf("failed to prepare getFromTableStmt, error: %v", err)
+	//	return nil, err
+	//}
+	//
+	//deleteFromTableStmt, err := conn.Prepare(context.Background(), "DeleteById", `DELETE FROM products where id = $1`)
+	//if err != nil {
+	//	logrus.Errorf("failed to prepare deleteFromTableStmt, error: %v", err)
+	//	return nil, err
+	//}
+	//
+	//getAllFromTable, err := conn.Prepare(context.Background(), "GetAllFromDb", `SELECT id, json_data FROM products`)
+	//if err != nil {
+	//	logrus.Errorf("failed to prepare getAllFromTableStmt, error: %v", err)
+	//	return nil, err
+	//}
 
 	return &Database{db: conn,
 		putInArticlesStmt:          putInArticlesStmt,
 		getFromHabsInformationStmt: getFromHabsInformationStmt,
-		getFromTableStmt:           getFromTableStmt,
-		deleteFromTableStmt:        deleteFromTableStmt,
-		getAllFromTableStmt:        getAllFromTable,
 	}, nil
 }
 
-func (d *Database) Put(articleUrl string, username string, usernameUrl string, title string, date time.Time) (int, error) {
+func (d *Database) Put(articleUrl string, username string, usernameUrl string, title string, date time.Time, habType string) (int, error) {
 	var id int
-	if err := d.db.QueryRow(context.Background(), d.putInArticlesStmt.Name, articleUrl, username, usernameUrl, title, date).Scan(&id); err != nil {
+	if err := d.db.QueryRow(context.Background(), d.putInArticlesStmt.Name, articleUrl, username, usernameUrl, title, date, habType).Scan(&id); err != nil {
 		return 0, err
 	}
 
 	return id, nil
 }
 
-func (d *Database) GetHabsInfo() ([]parser.HabInfo, error) {
+func (d *Database) GetHabsInfo() ([]models.HabInfo, error) {
 	rows, err := d.db.Query(context.Background(), d.getFromHabsInformationStmt.Name)
 	if err != nil {
 		return nil, err
@@ -105,7 +101,7 @@ func (d *Database) GetHabsInfo() ([]parser.HabInfo, error) {
 		articlePageQueryTitle    string
 		articlePageQueryTime     string
 	)
-	habInfo := make([]parser.HabInfo, 0)
+	habInfo := make([]models.HabInfo, 0)
 
 	for rows.Next() {
 		err = rows.Scan(&habType, &mainUrl, &mainPageQueryArticle, &articleUrlPrefix, &articlePageQueryUserLink, &articlePageQueryTitle, &articlePageQueryTime)
@@ -114,7 +110,7 @@ func (d *Database) GetHabsInfo() ([]parser.HabInfo, error) {
 			continue
 		}
 
-		habInfo = append(habInfo, parser.HabInfo{
+		habInfo = append(habInfo, models.HabInfo{
 			HabType:                  habType,
 			MainUrl:                  mainUrl,
 			ArticleUrlPrefix:         mainPageQueryArticle,

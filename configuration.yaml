@@ -1,22 +1,10 @@
 parser:
   habr:
-    links:
-      main-url: https://habr.com/ru/articles/
-      article-url-prefix: https://habr.com
-
-    main-page-query:
-      article: a.tm-title__link
-
-    article-page-query:
-      user-link: a.tm-user-info__username
-      time: span.tm-article-datetime-published
-      title: h1.tm-title
-
   goroutines-amount: 5
-  default-interval: 10m
+  default-interval: 10s
 
 database:
-  host: database
+  host: localhost
   port: 5432
   database: postgres
   username: postgres

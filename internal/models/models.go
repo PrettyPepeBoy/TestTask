@@ -1,6 +1,4 @@
-package parser
-
-import "errors"
+package models
 
 type ArticleData struct {
 	Username    string
@@ -8,6 +6,7 @@ type ArticleData struct {
 	Title       string
 	Url         string
 	PublishData string
+	HabType     string
 }
 
 type HabInfo struct {
@@ -19,11 +18,3 @@ type HabInfo struct {
 	ArticlePageQueryTime     string
 	ArticlePageQueryUserLink string
 }
-
-var (
-	ErrUrlIsEmpty         = errors.New("url is empty")
-	ErrTitleIsEmpty       = errors.New("title is empty")
-	ErrUsernameIsEmpty    = errors.New("username is empty")
-	ErrUsernameUrlIsEmpty = errors.New("usernameUrl is empty")
-	ErrDateIsEmpty        = errors.New("date is empty")
-)

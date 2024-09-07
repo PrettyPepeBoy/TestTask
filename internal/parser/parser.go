@@ -1,18 +1,34 @@
 package parser
 
 import (
+	"context"
+	"errors"
 	"github.com/gocolly/colly/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"strings"
+	"sync"
 	"testTask/internal/database"
+	"testTask/internal/models"
 	"time"
 )
 
-type Parser struct {
-	habs    []*hab
-	storage *database.Database
+var (
+	ErrUrlIsEmpty         = errors.New("url is empty")
+	ErrTitleIsEmpty       = errors.New("title is empty")
+	ErrUsernameIsEmpty    = errors.New("username is empty")
+	ErrUsernameUrlIsEmpty = errors.New("usernameUrl is empty")
+	ErrDateIsEmpty        = errors.New("date is empty")
+)
 
+type Parser struct {
+	habs        []*hab
+	articlesBuf []*models.ArticleData
+	storage     *database.Database
+
+	mx               sync.Mutex
+	stop             context.CancelFunc
+	ctx              context.Context
 	goroutinesAmount int
 	c                <-chan articleInfo
 }
@@ -30,33 +46,64 @@ func NewParser(db *database.Database) (*Parser, error) {
 		habs = append(habs, newHab(habInfo, c))
 	}
 
-	return &Parser{
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+
+	p := &Parser{
+		articlesBuf:      make([]*models.ArticleData, 0),
+		ctx:              ctx,
+		stop:             cancel,
 		habs:             habs,
 		storage:          db,
 		goroutinesAmount: viper.GetInt("parser.goroutines-amount"),
 		c:                c,
-	}, nil
+	}
+
+	go func() {
+		for {
+			time.Sleep(30 * time.Second)
+			logrus.Info("start put data in table")
+			_ = p.putArticleInTable()
+		}
+	}()
+
+	return p, nil
 }
 
 func (p *Parser) Parse() {
 	for _, h := range p.habs {
 		go func(h *hab) {
 			for {
-				<-h.timer.C
-				h.parseMainPage()
-				h.timer.Reset(h.interval)
+				select {
+				case <-h.timer.C:
+					h.parseMainPage()
+					//h.timer.Reset(h.interval)
+					h.timer.Reset(time.Hour)
+				case <-p.ctx.Done():
+					return
+				}
 			}
 		}(h)
 
 	}
 
-	p.setupParseArticle()
+	for i := 0; i < p.goroutinesAmount; i++ {
+		go p.processRoutine(p.ctx)
+	}
 }
 
-func (p *Parser) parseArticle(info articleInfo) *ArticleData {
+func (p *Parser) AddHub() {
+
+}
+
+func (p *Parser) UnsafeStopParse() {
+	p.stop()
+}
+
+func (p *Parser) parseArticle(info articleInfo) *models.ArticleData {
 	collector := colly.NewCollector()
 
-	var data ArticleData
+	var data models.ArticleData
 
 	data.Url = info.url
 
@@ -81,30 +128,27 @@ func (p *Parser) parseArticle(info articleInfo) *ArticleData {
 	return &data
 }
 
-func (p *Parser) setupParseArticle() {
-	for i := 0; i < p.goroutinesAmount; i++ {
-		go p.processRoutine()
-	}
-}
-
 type articleInfo struct {
 	url string
 	h   *hab
 }
 
-func (p *Parser) processRoutine() {
+func (p *Parser) processRoutine(ctx context.Context) {
 	for {
-		val := <-p.c
-		article := p.parseArticle(val)
-		err := putArticleInTable(article, p.storage)
-		if err != nil {
-			logrus.Errorf("failed to put data in database, error: %v", err)
+		select {
+		case val := <-p.c:
+			article := p.parseArticle(val)
+			article.HabType = val.h.habInfo.HabType
+			p.articlesBuf = append(p.articlesBuf, article)
+
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 type hab struct {
-	habInfo  HabInfo
+	habInfo  models.HabInfo
 	interval time.Duration
 	timer    *time.Timer
 
@@ -112,7 +156,7 @@ type hab struct {
 	c              chan<- articleInfo
 }
 
-func newHab(habInfo HabInfo, c chan articleInfo) *hab {
+func newHab(habInfo models.HabInfo, c chan articleInfo) *hab {
 	return &hab{
 		interval: viper.GetDuration("parser.default-interval"),
 		timer:    time.NewTimer(viper.GetDuration("parser.default-interval")),
@@ -156,41 +200,50 @@ func (h *hab) sendArticlesFromBufToParse() {
 	h.articleUrlsBuf = h.articleUrlsBuf[:0]
 }
 
-func putArticleInTable(article *ArticleData, db *database.Database) error {
-	if article.Url == "" {
-		return ErrUrlIsEmpty
+func (p *Parser) putArticleInTable() error {
+	for _, article := range p.articlesBuf {
+		if article.Url == "" {
+			logrus.Error(ErrUrlIsEmpty)
+			continue
+		}
+
+		if article.Title == "" {
+			logrus.Error(ErrTitleIsEmpty)
+			continue
+		}
+
+		if article.Username == "" {
+			logrus.Error(ErrUsernameIsEmpty)
+			continue
+		}
+
+		if article.UsernameUrl == "" {
+			logrus.Error(ErrUsernameUrlIsEmpty)
+			continue
+		}
+
+		if article.PublishData == "" {
+			logrus.Error(ErrDateIsEmpty)
+			continue
+		}
+
+		date, err := time.Parse(time.RFC3339, article.PublishData)
+		if err != nil {
+			logrus.Errorf("failed to convert data to time, error: %v", err)
+			continue
+		}
+
+		username := strings.TrimSpace(article.Username)
+		usernameUrl := strings.TrimSpace(article.UsernameUrl)
+		url := strings.TrimSpace(article.Url)
+
+		_, err = p.storage.Put(url, username, usernameUrl, article.Title, date, article.HabType)
+		if err != nil {
+			logrus.Errorf("failed to put data, error: %v", err)
+		}
 	}
 
-	if article.Title == "" {
-		return ErrTitleIsEmpty
-	}
-
-	if article.Username == "" {
-		return ErrUsernameIsEmpty
-	}
-
-	if article.UsernameUrl == "" {
-		return ErrUsernameUrlIsEmpty
-	}
-
-	if article.PublishData == "" {
-		return ErrDateIsEmpty
-	}
-
-	date, err := time.Parse(time.RFC3339, article.PublishData)
-	if err != nil {
-		logrus.Errorf("failed to convert data to time, error: %v", err)
-		return err
-	}
-
-	username := strings.TrimSpace(article.Username)
-	usernameUrl := strings.TrimSpace(article.UsernameUrl)
-	url := strings.TrimSpace(article.Url)
-
-	_, err = db.Put(url, username, usernameUrl, article.Title, date)
-	if err != nil {
-		return err
-	}
+	p.articlesBuf = p.articlesBuf[:0]
 
 	return nil
 }
