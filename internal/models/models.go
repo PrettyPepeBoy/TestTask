@@ -10,13 +10,3 @@ type ArticleData struct {
 	PublishData time.Time
 	HabType     string
 }
-
-type HabInfo struct {
-	HabType                  string
-	MainUrl                  string
-	ArticleUrlPrefix         string
-	MainPageQueryArticle     string
-	ArticlePageQueryTitle    string
-	ArticlePageQueryTime     string
-	ArticlePageQueryUserLink string
-}

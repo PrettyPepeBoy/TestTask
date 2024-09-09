@@ -29,7 +29,6 @@ type Parser struct {
 	ctx              context.Context
 	stop             context.CancelFunc
 	goroutinesAmount int
-	routeChan        chan string
 	c                <-chan articleInfo
 }
 
@@ -49,7 +48,6 @@ func NewParser(db *database.Database) (*Parser, error) {
 			buf: make([]*models.ArticleData, 0),
 			mx:  sync.Mutex{},
 		},
-		routeChan:        make(chan string, 1),
 		habs:             habs,
 		storage:          db,
 		goroutinesAmount: viper.GetInt("parser.goroutines-amount"),
@@ -78,11 +76,6 @@ func (p *Parser) Parse() {
 		go p.processRoutine(p.ctx)
 	}
 
-	go func() {
-		for {
-			p.habs[<-p.routeChan].setupRoutine()
-		}
-	}()
 }
 
 func (p *Parser) StopParsingHab(habType string) error {
@@ -132,8 +125,8 @@ type articleInfo struct {
 func (p *Parser) processRoutine(ctx context.Context) {
 	for {
 		select {
-		case parse := <-p.c:
-			article := habsMap[parse.habType].parseArticlePage(parse.url)
+		case val := <-p.c:
+			article := habsMap[val.habType].parseArticlePage(val.url)
 			p.articlesBuf.appendBuf(article)
 
 		case <-ctx.Done():
@@ -171,8 +164,7 @@ func (p *Parser) putArticleInTable() error {
 			continue
 		}
 
-		logrus.Infof("Put Aritcle %s", article.Title)
-		_, err := p.storage.Put(article.Url, article.Username, article.UsernameUrl, article.Title, article.PublishData, article.HabType)
+		_, err := p.storage.PutArticle(article.Url, article.Username, article.UsernameUrl, article.Title, article.PublishData, article.HabType)
 		if err != nil {
 			logrus.Errorf("failed to put data, error: %v", err)
 		}

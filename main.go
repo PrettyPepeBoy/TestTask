@@ -12,18 +12,21 @@ import (
 	"testTask/internal/database"
 	"testTask/internal/endpoint"
 	"testTask/internal/parser"
+	"testTask/internal/user"
 )
 
 var (
-	pars    *parser.Parser
-	db      *database.Database
-	handler *endpoint.HttpHandler
+	pars       *parser.Parser
+	db         *database.Database
+	handler    *endpoint.HttpHandler
+	authorizer *user.Authorizer
 )
 
 func main() {
 	setupConfig()
 	setupDatabase()
 	setupParser()
+	setupAuthorizer()
 	setupHttpHandler()
 
 	c := make(chan os.Signal, 1)
@@ -33,7 +36,7 @@ func main() {
 }
 
 func setupHttpHandler() {
-	handler = endpoint.NewHttpHandler(pars)
+	handler = endpoint.NewHttpHandler(pars, authorizer)
 	go func() {
 		logrus.Info("Server started")
 		err := fasthttp.ListenAndServe(viper.GetString("server.host")+":"+viper.GetString("server.port"), handler.Handle)
@@ -90,5 +93,13 @@ func setupConfig() {
 	err = viper.ReadConfig(&configData)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func setupAuthorizer() {
+	var err error
+	authorizer, err = user.NewAuthorizer()
+	if err != nil {
+		logrus.Fatalf("failed to create new authorizer, error: %v", err)
 	}
 }

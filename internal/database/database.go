@@ -16,6 +16,7 @@ import (
 type Database struct {
 	db                         *pgx.Conn
 	putInArticlesStmt          *pgconn.StatementDescription
+	putInformationInHabsStmt   *pgconn.StatementDescription
 	getFromHabsInformationStmt *pgconn.StatementDescription
 	getFromTableStmt           *pgconn.StatementDescription
 	deleteFromTableStmt        *pgconn.StatementDescription
@@ -42,9 +43,18 @@ func NewDatabase() (*Database, error) {
 		return nil, err
 	}
 
+	_, err = conn.Exec(context.Background(), `CREATE TABLE IF NOT EXISTS habs(habType text unique, habMainPageUrl text unique);
+	CREATE TABLE IF NOT EXISTS articles (id serial, articleUrl  text, username text, usernameUrl text, title text, date time, habType text references habs (habType));`)
+
 	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date, habType) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`)
 	if err != nil {
 		logrus.Errorf("failed to prepare putInAriclesStmt, error: %v", err)
+		return nil, err
+	}
+
+	putInformationInHabsStmt, err := conn.Prepare(context.Background(), "Put habs", `INSERT INTO habs(habType, habMainPageUrl) VALUES ($1, $2)`)
+	if err != nil {
+		logrus.Errorf("failed to preapre putInformationInHabsStmt, error: %v", err)
 		return nil, err
 	}
 
@@ -73,11 +83,12 @@ func NewDatabase() (*Database, error) {
 
 	return &Database{db: conn,
 		putInArticlesStmt:          putInArticlesStmt,
+		putInformationInHabsStmt:   putInformationInHabsStmt,
 		getFromHabsInformationStmt: getFromHabsInformationStmt,
 	}, nil
 }
 
-func (d *Database) Put(articleUrl string, username string, usernameUrl string, title string, date time.Time, habType string) (int, error) {
+func (d *Database) PutArticle(articleUrl string, username string, usernameUrl string, title string, date time.Time, habType string) (int, error) {
 	var id int
 	if err := d.db.QueryRow(context.Background(), d.putInArticlesStmt.Name, articleUrl, username, usernameUrl, title, date, habType).Scan(&id); err != nil {
 		return 0, err
@@ -86,10 +97,11 @@ func (d *Database) Put(articleUrl string, username string, usernameUrl string, t
 	return id, nil
 }
 
-func (d *Database) GetHabsInfo() ([]models.HabInfo, error) {
+func (d *Database) setHabsInfo() error {
 	rows, err := d.db.Query(context.Background(), d.getFromHabsInformationStmt.Name)
 	if err != nil {
-		return nil, err
+		logrus.Errorf("failed to put data in table, error: %v", err)
+		return err
 	}
 
 	var (

@@ -1,0 +1,22 @@
+services:
+  main:
+    build:
+      dockerfile: Dockerfile
+    command: ./main
+    ports:
+      - 8001:8001
+    environment:
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+
+  database:
+    restart: always
+    image: postgres:latest
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD}
+    volumes:
+      - database_data:/var/lib/postgresql/data
+
+volumes:
+  database_data:

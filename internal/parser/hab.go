@@ -96,7 +96,7 @@ var habsMap = map[string]habParseFunctions{
 			data.Url = url
 
 			collector.OnHTML("div.article-author__name", func(htmlElement *colly.HTMLElement) {
-				data.Username = htmlElement.Text
+				data.Username = strings.TrimSpace(htmlElement.Text)
 			})
 
 			collector.OnHTML("div.article-author__image", func(htmlElement *colly.HTMLElement) {
@@ -104,7 +104,7 @@ var habsMap = map[string]habParseFunctions{
 			})
 
 			collector.OnHTML("h1.article-preview__title", func(htmlElement *colly.HTMLElement) {
-				data.Title = htmlElement.Text
+				data.Title = strings.TrimSpace(htmlElement.Text)
 			})
 
 			collector.OnHTML("time.info-text", func(htmlElement *colly.HTMLElement) {
