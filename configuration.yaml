@@ -1,7 +1,7 @@
 parser:
   habr:
   goroutines-amount: 5
-  default-interval: 10s
+  default-interval: 2s
 
 database:
   host: localhost

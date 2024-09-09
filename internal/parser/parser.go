@@ -3,10 +3,8 @@ package parser
 import (
 	"context"
 	"errors"
-	"github.com/gocolly/colly/v2"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	"strings"
 	"sync"
 	"testTask/internal/database"
 	"testTask/internal/models"
@@ -18,50 +16,47 @@ var (
 	ErrTitleIsEmpty       = errors.New("title is empty")
 	ErrUsernameIsEmpty    = errors.New("username is empty")
 	ErrUsernameUrlIsEmpty = errors.New("usernameUrl is empty")
-	ErrDateIsEmpty        = errors.New("date is empty")
+	ErrHabIsEmpty         = errors.New("habType is empty")
 )
 
 type Parser struct {
 	habs        []*hab
-	articlesBuf []*models.ArticleData
+	articlesBuf *articlesBuf
 	storage     *database.Database
 
-	mx               sync.Mutex
-	stop             context.CancelFunc
 	ctx              context.Context
+	stop             context.CancelFunc
 	goroutinesAmount int
 	c                <-chan articleInfo
 }
 
 func NewParser(db *database.Database) (*Parser, error) {
-	habsInfo, err := db.GetHabsInfo()
-	if err != nil {
-		return nil, err
-	}
-
 	c := make(chan articleInfo)
 
-	habs := make([]*hab, 0, len(habsInfo))
-	for _, habInfo := range habsInfo {
-		habs = append(habs, newHab(habInfo, c))
+	habs := make([]*hab, 0, len(habsMap))
+	for habType, f := range habsMap {
+		habs = append(habs, newHab(habType, f, c))
 	}
 
 	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, stop := context.WithCancel(ctx)
 
 	p := &Parser{
-		articlesBuf:      make([]*models.ArticleData, 0),
-		ctx:              ctx,
-		stop:             cancel,
+		articlesBuf: &articlesBuf{
+			buf: make([]*models.ArticleData, 0),
+			mx:  sync.Mutex{},
+		},
 		habs:             habs,
 		storage:          db,
 		goroutinesAmount: viper.GetInt("parser.goroutines-amount"),
 		c:                c,
+		ctx:              ctx,
+		stop:             stop,
 	}
 
 	go func() {
 		for {
-			time.Sleep(30 * time.Second)
+			time.Sleep(20 * time.Second)
 			logrus.Info("start put data in table")
 			_ = p.putArticleInTable()
 		}
@@ -72,19 +67,7 @@ func NewParser(db *database.Database) (*Parser, error) {
 
 func (p *Parser) Parse() {
 	for _, h := range p.habs {
-		go func(h *hab) {
-			for {
-				select {
-				case <-h.timer.C:
-					h.parseMainPage()
-					//h.timer.Reset(h.interval)
-					h.timer.Reset(time.Hour)
-				case <-p.ctx.Done():
-					return
-				}
-			}
-		}(h)
-
+		h.setupRoutine()
 	}
 
 	for i := 0; i < p.goroutinesAmount; i++ {
@@ -100,46 +83,18 @@ func (p *Parser) UnsafeStopParse() {
 	p.stop()
 }
 
-func (p *Parser) parseArticle(info articleInfo) *models.ArticleData {
-	collector := colly.NewCollector()
-
-	var data models.ArticleData
-
-	data.Url = info.url
-
-	collector.OnHTML(info.h.habInfo.ArticlePageQueryUserLink, func(htmlElement *colly.HTMLElement) {
-		data.UsernameUrl = htmlElement.Attr("href")
-		data.Username = htmlElement.Text
-	})
-
-	collector.OnHTML(info.h.habInfo.ArticlePageQueryTitle, func(htmlElement *colly.HTMLElement) {
-		data.Title = htmlElement.Text
-	})
-
-	collector.OnHTML(info.h.habInfo.ArticlePageQueryTime, func(htmlElement *colly.HTMLElement) {
-		data.PublishData, _ = htmlElement.DOM.Children().Attr("datetime")
-	})
-
-	err := collector.Visit(data.Url)
-	if err != nil {
-		logrus.Errorf("failed to visit %s, error: %v", data.Url, err)
-	}
-
-	return &data
-}
-
 type articleInfo struct {
-	url string
-	h   *hab
+	url     string
+	habType string
 }
 
 func (p *Parser) processRoutine(ctx context.Context) {
 	for {
 		select {
-		case val := <-p.c:
-			article := p.parseArticle(val)
-			article.HabType = val.h.habInfo.HabType
-			p.articlesBuf = append(p.articlesBuf, article)
+		case parse := <-p.c:
+			article := habsMap[parse.habType].parseArticlePage(parse.url)
+			logrus.Infof("parsed article on url %s", parse.url)
+			p.articlesBuf.appendBuf(article)
 
 		case <-ctx.Done():
 			return
@@ -147,61 +102,10 @@ func (p *Parser) processRoutine(ctx context.Context) {
 	}
 }
 
-type hab struct {
-	habInfo  models.HabInfo
-	interval time.Duration
-	timer    *time.Timer
-
-	articleUrlsBuf []string
-	c              chan<- articleInfo
-}
-
-func newHab(habInfo models.HabInfo, c chan articleInfo) *hab {
-	return &hab{
-		interval: viper.GetDuration("parser.default-interval"),
-		timer:    time.NewTimer(viper.GetDuration("parser.default-interval")),
-		habInfo:  habInfo,
-
-		articleUrlsBuf: make([]string, 0),
-		c:              c,
-	}
-}
-
-func (h *hab) parseMainPage() {
-	h.fillArticlesBuf()
-	h.sendArticlesFromBufToParse()
-}
-
-func (h *hab) fillArticlesBuf() {
-	collector := colly.NewCollector()
-
-	collector.OnHTML(h.habInfo.MainPageQueryArticle, func(htmlElement *colly.HTMLElement) {
-		articleUrl, ok := htmlElement.DOM.Attr("href")
-		if !ok {
-			panic("wrong attribute was given to selection")
-		}
-		h.articleUrlsBuf = append(h.articleUrlsBuf, strings.TrimSpace(h.habInfo.ArticleUrlPrefix+articleUrl))
-	})
-
-	err := collector.Visit(h.habInfo.MainUrl)
-	if err != nil {
-		logrus.Errorf("failed to visit url, URL: %s, error: %v", h.habInfo.MainUrl, err)
-	}
-}
-
-func (h *hab) sendArticlesFromBufToParse() {
-	for _, elem := range h.articleUrlsBuf {
-		h.c <- articleInfo{
-			url: elem,
-			h:   h,
-		}
-	}
-
-	h.articleUrlsBuf = h.articleUrlsBuf[:0]
-}
-
 func (p *Parser) putArticleInTable() error {
-	for _, article := range p.articlesBuf {
+	p.articlesBuf.mx.Lock()
+
+	for _, article := range p.articlesBuf.buf {
 		if article.Url == "" {
 			logrus.Error(ErrUrlIsEmpty)
 			continue
@@ -222,28 +126,31 @@ func (p *Parser) putArticleInTable() error {
 			continue
 		}
 
-		if article.PublishData == "" {
-			logrus.Error(ErrDateIsEmpty)
+		if article.HabType == "" {
+			logrus.Error(ErrHabIsEmpty)
 			continue
 		}
 
-		date, err := time.Parse(time.RFC3339, article.PublishData)
-		if err != nil {
-			logrus.Errorf("failed to convert data to time, error: %v", err)
-			continue
-		}
-
-		username := strings.TrimSpace(article.Username)
-		usernameUrl := strings.TrimSpace(article.UsernameUrl)
-		url := strings.TrimSpace(article.Url)
-
-		_, err = p.storage.Put(url, username, usernameUrl, article.Title, date, article.HabType)
+		logrus.Infof("Put Aritcle %s", article.Title)
+		_, err := p.storage.Put(article.Url, article.Username, article.UsernameUrl, article.Title, article.PublishData, article.HabType)
 		if err != nil {
 			logrus.Errorf("failed to put data, error: %v", err)
 		}
 	}
 
-	p.articlesBuf = p.articlesBuf[:0]
+	p.articlesBuf.buf = p.articlesBuf.buf[:0]
+	p.articlesBuf.mx.Unlock()
 
 	return nil
+}
+
+type articlesBuf struct {
+	buf []*models.ArticleData
+	mx  sync.Mutex
+}
+
+func (a *articlesBuf) appendBuf(data *models.ArticleData) {
+	a.mx.Lock()
+	a.buf = append(a.buf, data)
+	a.mx.Unlock()
 }

@@ -42,7 +42,7 @@ func NewDatabase() (*Database, error) {
 		return nil, err
 	}
 
-	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date, habType) VALUES ($1, $2, $3, $4, $5, $6)`)
+	putInArticlesStmt, err := conn.Prepare(context.Background(), "Put Article", `INSERT INTO articles(articleURL, username, usernameURL, title, date, habType) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`)
 	if err != nil {
 		logrus.Errorf("failed to prepare putInAriclesStmt, error: %v", err)
 		return nil, err
