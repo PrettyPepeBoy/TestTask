@@ -1,7 +1,6 @@
 parser:
-  habr:
   goroutines-amount: 5
-  default-interval: 2s
+  default-interval: 10s
 
 database:
   host: localhost
@@ -9,3 +8,7 @@ database:
   database: postgres
   username: postgres
   password: '{{env "POSTGRES_PASSWORD"}}'
+
+server:
+  host: localhost
+  port: 8001

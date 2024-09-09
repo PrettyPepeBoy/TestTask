@@ -12,30 +12,33 @@ import (
 )
 
 var (
-	ErrUrlIsEmpty         = errors.New("url is empty")
-	ErrTitleIsEmpty       = errors.New("title is empty")
-	ErrUsernameIsEmpty    = errors.New("username is empty")
-	ErrUsernameUrlIsEmpty = errors.New("usernameUrl is empty")
-	ErrHabIsEmpty         = errors.New("habType is empty")
+	ErrUrlIsEmpty          = errors.New("url is empty")
+	ErrTitleIsEmpty        = errors.New("title is empty")
+	ErrUsernameIsEmpty     = errors.New("username is empty")
+	ErrUsernameUrlIsEmpty  = errors.New("usernameUrl is empty")
+	ErrHabIsEmpty          = errors.New("habType is empty")
+	ErrHabIsNotExist       = errors.New("such hab does not exist")
+	ErrHabIsAlreadyParsing = errors.New("hab is already parsing")
 )
 
 type Parser struct {
-	habs        []*hab
+	habs        map[string]*hab
 	articlesBuf *articlesBuf
 	storage     *database.Database
 
 	ctx              context.Context
 	stop             context.CancelFunc
 	goroutinesAmount int
+	routeChan        chan string
 	c                <-chan articleInfo
 }
 
 func NewParser(db *database.Database) (*Parser, error) {
 	c := make(chan articleInfo)
 
-	habs := make([]*hab, 0, len(habsMap))
+	habs := make(map[string]*hab)
 	for habType, f := range habsMap {
-		habs = append(habs, newHab(habType, f, c))
+		habs[habType] = newHab(habType, f, c)
 	}
 
 	ctx := context.Background()
@@ -46,6 +49,7 @@ func NewParser(db *database.Database) (*Parser, error) {
 			buf: make([]*models.ArticleData, 0),
 			mx:  sync.Mutex{},
 		},
+		routeChan:        make(chan string, 1),
 		habs:             habs,
 		storage:          db,
 		goroutinesAmount: viper.GetInt("parser.goroutines-amount"),
@@ -56,7 +60,7 @@ func NewParser(db *database.Database) (*Parser, error) {
 
 	go func() {
 		for {
-			time.Sleep(20 * time.Second)
+			time.Sleep(60 * time.Second)
 			logrus.Info("start put data in table")
 			_ = p.putArticleInTable()
 		}
@@ -73,14 +77,51 @@ func (p *Parser) Parse() {
 	for i := 0; i < p.goroutinesAmount; i++ {
 		go p.processRoutine(p.ctx)
 	}
+
+	go func() {
+		for {
+			p.habs[<-p.routeChan].setupRoutine()
+		}
+	}()
 }
 
-func (p *Parser) AddHub() {
+func (p *Parser) StopParsingHab(habType string) error {
+	h, ok := p.habs[habType]
+	if !ok {
+		return ErrHabIsNotExist
+	}
 
+	h.timer.Stop()
+	return nil
 }
 
-func (p *Parser) UnsafeStopParse() {
-	p.stop()
+func (p *Parser) AddHabForParsing(habType string) error {
+	h, ok := p.habs[habType]
+	if !ok {
+		return ErrHabIsNotExist
+	}
+
+	if !h.timer.Stop() {
+		h.timer.Reset(h.interval)
+		return nil
+	}
+
+	return ErrHabIsAlreadyParsing
+}
+
+func (p *Parser) ChangeIntervalForHab(habType string, interval string) error {
+	_, ok := p.habs[habType]
+	if !ok {
+		return ErrHabIsNotExist
+	}
+
+	t, err := time.ParseDuration(interval)
+	if err != nil {
+		return err
+	}
+
+	p.habs[habType].changeParseInterval(t)
+	return nil
 }
 
 type articleInfo struct {
@@ -93,7 +134,6 @@ func (p *Parser) processRoutine(ctx context.Context) {
 		select {
 		case parse := <-p.c:
 			article := habsMap[parse.habType].parseArticlePage(parse.url)
-			logrus.Infof("parsed article on url %s", parse.url)
 			p.articlesBuf.appendBuf(article)
 
 		case <-ctx.Done():

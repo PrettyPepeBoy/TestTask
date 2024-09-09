@@ -4,29 +4,43 @@ import (
 	"bytes"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"github.com/valyala/fasthttp"
 	"html/template"
 	"os"
 	"os/signal"
 	"testTask/internal/cast"
 	"testTask/internal/database"
+	"testTask/internal/endpoint"
 	"testTask/internal/parser"
 )
 
 var (
-	pars *parser.Parser
-	db   *database.Database
+	pars    *parser.Parser
+	db      *database.Database
+	handler *endpoint.HttpHandler
 )
 
 func main() {
 	setupConfig()
 	setupDatabase()
 	setupParser()
+	setupHttpHandler()
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 
-	logrus.Info("start server")
 	<-c
+}
+
+func setupHttpHandler() {
+	handler = endpoint.NewHttpHandler(pars)
+	go func() {
+		logrus.Info("Server started")
+		err := fasthttp.ListenAndServe(viper.GetString("server.host")+":"+viper.GetString("server.port"), handler.Handle)
+		if err != nil {
+			logrus.Fatal("Listen error: ", err.Error())
+		}
+	}()
 }
 
 func setupDatabase() {

@@ -163,6 +163,7 @@ func (h *hab) parseMainPage() {
 }
 
 func (h *hab) fillArticlesBuf() {
+	logrus.Infof("statt fill articles buf on %s, timer: %v", h.habType, h.interval)
 	h.articleUrlsBuf = h.parseFunctions.parseMainPage(h.articleUrlsBuf)
 }
 
@@ -184,16 +185,24 @@ func (h *hab) sendArticlesFromBufToParse() {
 }
 
 func (h *hab) setupRoutine() {
-	go func(h *hab) {
+	go func() {
 		for {
 			select {
 			case <-h.timer.C:
 				h.parseMainPage()
-				h.timer.Reset(time.Hour)
+				h.timer.Reset(h.interval)
 
 			case <-h.ctx.Done():
 				return
 			}
 		}
-	}(h)
+	}()
+}
+
+func (h *hab) stopRoutine() {
+	h.stop()
+}
+
+func (h *hab) changeParseInterval(interval time.Duration) {
+	h.interval = interval
 }
