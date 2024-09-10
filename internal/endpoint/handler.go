@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/valyala/fasthttp"
 	"testTask/internal/cast"
+	"testTask/internal/database"
 	"testTask/internal/parser"
 	"testTask/internal/user"
 )
@@ -33,7 +34,19 @@ var routingMap = map[string]route{
 	}},
 
 	"/api/v1/hab": {handler: func(ctx *fasthttp.RequestCtx, handler *HttpHandler) {
+		if cast.ByteArrayToSting(ctx.Method()) == fasthttp.MethodDelete {
+			handler.deleteHab(ctx)
+		} else {
+			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+		}
+	}},
 
+	"/api/v1/articles": {handler: func(ctx *fasthttp.RequestCtx, handler *HttpHandler) {
+		if cast.ByteArrayToSting(ctx.Method()) == fasthttp.MethodGet {
+			handler.getArticles(ctx)
+		} else {
+			ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+		}
 	}},
 }
 
@@ -50,14 +63,16 @@ type route struct {
 }
 
 type HttpHandler struct {
-	parser *parser.Parser
-	auth   *user.Authorizer
+	parser  *parser.Parser
+	auth    *user.Authorizer
+	storage *database.Database
 }
 
-func NewHttpHandler(parser *parser.Parser, auth *user.Authorizer) *HttpHandler {
+func NewHttpHandler(parser *parser.Parser, auth *user.Authorizer, storage *database.Database) *HttpHandler {
 	return &HttpHandler{
-		parser: parser,
-		auth:   auth,
+		parser:  parser,
+		auth:    auth,
+		storage: storage,
 	}
 }
 
@@ -135,6 +150,25 @@ func (h *HttpHandler) changeIntervalForHab(ctx *fasthttp.RequestCtx) {
 	ctx.SetBodyString(fmt.Sprintf("successfully change interval parsing for %s, to %s", hab, interval))
 }
 
+func (h *HttpHandler) deleteHab(ctx *fasthttp.RequestCtx) {
+	_, err := h.authorizeModification(ctx)
+	if err != nil {
+		writeError(ctx, err.Error(), fasthttp.StatusForbidden)
+		return
+	}
+
+	hab := cast.ByteArrayToSting(ctx.QueryArgs().Peek("hab"))
+
+	ids, err := h.parser.DeleteHab(hab)
+	if err != nil {
+		writeError(ctx, err.Error(), fasthttp.StatusBadRequest)
+		return
+	}
+
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	ctx.SetBodyString(fmt.Sprintf("deleted ids: %d", ids))
+}
+
 func (h *HttpHandler) authorizeModification(ctx *fasthttp.RequestCtx) (string, error) {
 	token := ctx.Request.Header.Peek("Private-Token")
 	if len(token) == 0 {
@@ -142,6 +176,25 @@ func (h *HttpHandler) authorizeModification(ctx *fasthttp.RequestCtx) (string, e
 	}
 
 	return h.auth.Verify(cast.ByteArrayToSting(token))
+}
+
+func (h *HttpHandler) getArticles(ctx *fasthttp.RequestCtx) {
+	data, err := h.storage.GetArticles()
+	if err != nil {
+		writeError(ctx, err.Error(), fasthttp.StatusInternalServerError)
+		return
+	}
+
+	rawResp, err := json.Marshal(data)
+	if err != nil {
+		writeError(ctx, err.Error(), fasthttp.StatusInternalServerError)
+		return
+	}
+
+	ctx.Response.Header.Set(fasthttp.HeaderContentType, "application/json")
+	ctx.SetBody(rawResp)
+	ctx.SetStatusCode(fasthttp.StatusOK)
+
 }
 
 type errorResponse struct {

@@ -1,18 +1,17 @@
 parser:
   goroutines-amount: 5
-  default-interval: 10m
-  load-data-interval: 15m
+  default-interval: 15s
+  load-data-interval: 30s
 
 database:
-  host: localhost
+  host: database
   port: 5432
   database: postgres
   username: postgres
   password: '{{env "POSTGRES_PASSWORD"}}'
 
 server:
-  host: localhost
   port: 8001
 
 authorize:
-  file-location: ./admins.json
+  file-location: .admins.json

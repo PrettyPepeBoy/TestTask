@@ -32,6 +32,7 @@ type Parser struct {
 	c                <-chan articleInfo
 }
 
+// NewParser inits new Parser object
 func NewParser(db *database.Database) (*Parser, error) {
 	c := make(chan articleInfo)
 
@@ -67,6 +68,9 @@ func NewParser(db *database.Database) (*Parser, error) {
 	return p, nil
 }
 
+// Parse starts parsing habs from habsMap.
+// It allocates new routine for every hab to parse it`s main page.
+// Also, Parse setups routines for processing routines parsing.
 func (p *Parser) Parse() {
 	for _, h := range p.habs {
 		h.setupRoutine()
@@ -75,9 +79,11 @@ func (p *Parser) Parse() {
 	for i := 0; i < p.goroutinesAmount; i++ {
 		go p.processRoutine(p.ctx)
 	}
-
 }
 
+// StopParsingHab stops timer of main page parser.
+// To use this method you should specify habType of the routine, that you want to stop.
+// If habType is not located in habsMap, StopParsingHab returns an error.
 func (p *Parser) StopParsingHab(habType string) error {
 	h, ok := p.habs[habType]
 	if !ok {
@@ -88,6 +94,9 @@ func (p *Parser) StopParsingHab(habType string) error {
 	return nil
 }
 
+// AddHabForParsing method let routine resume parsing habType, who previously was stopped.
+// If habType is already parsing, AddHabForParsing returns an error.
+// If habType is not exist in habsMap, it also returns an error
 func (p *Parser) AddHabForParsing(habType string) error {
 	h, ok := p.habs[habType]
 	if !ok {
@@ -102,6 +111,8 @@ func (p *Parser) AddHabForParsing(habType string) error {
 	return ErrHabIsAlreadyParsing
 }
 
+// ChangeIntervalForHab is used to change parse interval for current hab.
+// If habType is not exist in habsMap, it returns an error.
 func (p *Parser) ChangeIntervalForHab(habType string, interval string) error {
 	_, ok := p.habs[habType]
 	if !ok {
@@ -115,6 +126,26 @@ func (p *Parser) ChangeIntervalForHab(habType string, interval string) error {
 
 	p.habs[habType].changeParseInterval(t)
 	return nil
+}
+
+// DeleteHab is used to delete hab from parsing.
+// WARNING! DeleteHab deletes hab from parsing forever and also delete all information about hab from storage.
+// To stop parsing hab for some time you should use StopParsingHab.
+func (p *Parser) DeleteHab(habType string) ([]int, error) {
+	h, ok := p.habs[habType]
+	if !ok {
+		return nil, ErrHabIsNotExist
+	}
+
+	h.stop()
+	ids, err := p.storage.DeleteHab(habType)
+	if err != nil {
+		return nil, err
+	}
+
+	delete(p.habs, habType)
+
+	return ids, nil
 }
 
 type articleInfo struct {
