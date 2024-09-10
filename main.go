@@ -39,7 +39,7 @@ func setupHttpHandler() {
 	handler = endpoint.NewHttpHandler(pars, authorizer)
 	go func() {
 		logrus.Info("Server started")
-		err := fasthttp.ListenAndServe(viper.GetString("server.host")+":"+viper.GetString("server.port"), handler.Handle)
+		err := fasthttp.ListenAndServe(":"+viper.GetString("server.port"), handler.Handle)
 		if err != nil {
 			logrus.Fatal("Listen error: ", err.Error())
 		}

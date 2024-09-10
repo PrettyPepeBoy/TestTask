@@ -58,7 +58,7 @@ func NewParser(db *database.Database) (*Parser, error) {
 
 	go func() {
 		for {
-			time.Sleep(60 * time.Second)
+			time.Sleep(viper.GetDuration("parser.load-data-interval"))
 			logrus.Info("start put data in table")
 			_ = p.putArticleInTable()
 		}

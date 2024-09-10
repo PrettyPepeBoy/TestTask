@@ -10,3 +10,8 @@ type ArticleData struct {
 	PublishData time.Time
 	HabType     string
 }
+
+type HabInfo struct {
+	HabType     string
+	MainPageUrl string
+}

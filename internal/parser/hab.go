@@ -69,6 +69,8 @@ var habsMap = map[string]habParseFunctions{
 
 			return &data
 		},
+
+		habMainPageUrl: "https://habr.com/ru/articles/",
 	},
 
 	"skillbox": {
@@ -120,6 +122,8 @@ var habsMap = map[string]habParseFunctions{
 
 			return &data
 		},
+
+		habMainPageUrl: "https://skillbox.ru/media/topic/articles/",
 	},
 }
 
@@ -138,6 +142,7 @@ type hab struct {
 type habParseFunctions struct {
 	parseMainPage    func(buf []string) []string
 	parseArticlePage func(url string) *models.ArticleData
+	habMainPageUrl   string
 }
 
 func newHab(habType string, f habParseFunctions, c chan articleInfo) *hab {
